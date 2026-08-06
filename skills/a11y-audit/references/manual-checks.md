@@ -23,17 +23,17 @@ Engines catch *empty* names. You catch *useless* ones:
 ### Contrast indeterminates (SC 1.4.3, 1.4.11): when queue has them
 Text over images/gradients/CSS variables the engine punted on. With a screenshot: judge worst-case region, report Flagged with screenshot. Without: report as indeterminate with selector. Never estimate a numeric ratio you didn't compute from actual colors. Non-text contrast (1.4.11): check focus indicators, form field borders, icon buttons against 3:1.
 
-### Keyboard access (SC 2.1.1, 2.1.2, 2.4.7): when browser available
-Tab through the page top to bottom:
+### Keyboard access (SC 2.1.1, 2.1.2, 2.4.7): run the interactive pass (SKILL.md step 4f)
+Agent-driven: inject `scripts/focus_probe.js` for the deterministic layer (tab stops, aria-hidden focusables, invisible tab stops, positive tabindex, skip link, focus-indicator heuristic), then real-key spot checks for what a probe cannot prove:
 - Every interactive element reachable and operable (Enter/Space)
-- Focus visible on each stop (invisible focus ring = P1)
+- Focus visible on each stop (invisible focus ring = P1 Flagged; confirm with real Tab, the probe's heuristic has both false positives and negatives)
 - No traps (can't tab out of a widget = P0)
 - Modals/drawers: focus moves in on open, returns on close, Escape closes
 - Skip link present and functional on first Tab
-Without a browser: Not exercised.
+Without any browser driver: Not exercised. The list above doubles as the checklist for a human tester.
 
-### Reflow and zoom (SC 1.4.4, 1.4.10): when browser available
-Resize to 320px width: no horizontal scroll, no clipped content, no overlap. Zoom to 200%: text scales, nothing lost. Check `meta-viewport` doesn't set `user-scalable=no` or `maximum-scale=1` (scanners catch this one).
+### Reflow and zoom (SC 1.4.4, 1.4.10): run the interactive pass (SKILL.md step 4f)
+Resize the driven window to 320px width: re-inject the probe (`horizontal_overflow`), screenshot for clipped/overlapping content. Zoom to 200%: text scales, nothing lost. Check `meta-viewport` doesn't set `user-scalable=no` or `maximum-scale=1` (scanners catch this one). Without a driver: Not exercised.
 
 ### Target size (SC 2.5.8): engine-owned, verify samples
 axe/Lighthouse `target-size` covers it (24×24 CSS px minimum with spacing exceptions). If flagged, screenshot one instance to confirm it's not an inline-text exception before reporting P1.
@@ -60,4 +60,4 @@ Cannot be automated at all: carousels auto-advance with no pause control; sessio
 Custom comboboxes/autocompletes, carousels, drag-and-drop, rich text editors, data grids, tree views, live-region-heavy UI (cart drawers, toasts). For each present on a sampled page: name the APG pattern it should implement, state the keyboard/ARIA contract it owes, check the cheap DOM half (roles, aria-expanded, tabindex), and put the behavioral half on the Human-required list with the specific question a tester should answer.
 
 ## Known engine blind spots (for the coverage disclosure)
-No engine checks: alt text quality, reading order, focus-indicator visibility quality, context-dependent color use, caption/transcript quality, error-message usefulness, cognitive load, motion/timing behavior. State this in every report.
+No scanning engine checks: alt text quality, reading order, focus-indicator visibility quality, context-dependent color use, caption/transcript quality, error-message usefulness, cognitive load, motion/timing behavior. Of these, keyboard operability, focus visibility, and reading-order smells are covered by the interactive pass when a browser driver is present (probe + real keys); the rest, and everything a screen reader announces, stays with a human. State this split in every report.
