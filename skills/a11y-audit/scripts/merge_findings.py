@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""Merge, normalize, dedup, and compress a11y scan output.
+
+Raw scanner JSON is 50K-500K tokens; this reduces it to a compact,
+WCAG-SC-keyed structure the model can reason over.
+
+Usage:
+    merge_findings.py OUTDIR                 # reads pa11y-*.json / lh-*.json written by scan.sh
+    merge_findings.py readability FILE.txt   # Flesch-Kincaid grade + stats for page text
+
+Writes to OUTDIR:
+    findings.json   normalized findings grouped by rule (SC, severity, per-page counts,
+                    sample nodes capped at MAX_NODES, judgment queue separated)
+    summary.md      compact human/model-readable digest
+
+Deterministic transforms only. No network, no model calls.
+"""
+import json
+import glob
+import os
+import re
+import sys
+from collections import defaultdict
+
+MAX_NODES = 5  # sample nodes kept per rule per page; remainder is counted, not dumped
+
+# axe rule id -> (WCAG SC, default impact). Covers the WCAG A/AA rules of axe-core 4.x
+# that appear in practice. Rules absent here fall back to SC "?" and impact from type.
+AXE_RULES = {
+    "area-alt": ("1.1.1", "critical"),
+    "image-alt": ("1.1.1", "critical"),
+    "input-image-alt": ("1.1.1", "critical"),
+    "object-alt": ("1.1.1", "serious"),
+    "role-img-alt": ("1.1.1", "serious"),
+    "svg-img-alt": ("1.1.1", "serious"),
+    "video-caption": ("1.2.2", "critical"),
+    "definition-list": ("1.3.1", "serious"),
+    "dlitem": ("1.3.1", "serious"),
+    "list": ("1.3.1", "serious"),
+    "listitem": ("1.3.1", "serious"),
+    "td-headers-attr": ("1.3.1", "serious"),
+    "th-has-data-cells": ("1.3.1", "serious"),
+    "table-fake-caption": ("1.3.1", "serious"),
+    "aria-hidden-body": ("1.3.1", "critical"),
+    "aria-required-children": ("1.3.1", "critical"),
+    "aria-required-parent": ("1.3.1", "critical"),
+    "css-orientation-lock": ("1.3.4", "serious"),
+    "autocomplete-valid": ("1.3.5", "serious"),
+    "avoid-inline-spacing": ("1.4.12", "serious"),
+    "color-contrast": ("1.4.3", "serious"),
+    "link-in-text-block": ("1.4.1", "serious"),
+    "meta-viewport": ("1.4.4", "critical"),
+    "meta-viewport-large": ("1.4.4", "minor"),
+    "bypass": ("2.4.1", "serious"),
+    "frame-title": ("4.1.2", "serious"),
+    "frame-title-unique": ("4.1.2", "serious"),
+    "document-title": ("2.4.2", "serious"),
+    "link-name": ("2.4.4", "serious"),
+    "button-name": ("4.1.2", "critical"),
+    "input-button-name": ("4.1.2", "critical"),
+    "select-name": ("4.1.2", "critical"),
+    "label": ("4.1.2", "critical"),
+    "form-field-multiple-labels": ("3.3.2", "moderate"),
+    "duplicate-id-aria": ("4.1.2", "critical"),
+    "html-has-lang": ("3.1.1", "serious"),
+    "html-lang-valid": ("3.1.1", "serious"),
+    "html-xml-lang-mismatch": ("3.1.1", "moderate"),
+    "valid-lang": ("3.1.2", "serious"),
+    "aria-allowed-attr": ("4.1.2", "critical"),
+    "aria-braille-equivalent": ("4.1.2", "serious"),
+    "aria-command-name": ("4.1.2", "serious"),
+    "aria-conditional-attr": ("4.1.2", "serious"),
+    "aria-deprecated-role": ("4.1.2", "minor"),
+    "aria-hidden-focus": ("4.1.2", "serious"),
+    "aria-input-field-name": ("4.1.2", "serious"),
+    "aria-meter-name": ("1.1.1", "serious"),
+    "aria-progressbar-name": ("1.1.1", "serious"),
+    "aria-prohibited-attr": ("4.1.2", "serious"),
+    "aria-required-attr": ("4.1.2", "critical"),
+    "aria-roles": ("4.1.2", "critical"),
+    "aria-toggle-field-name": ("4.1.2", "serious"),
+    "aria-tooltip-name": ("4.1.2", "serious"),
+    "aria-valid-attr": ("4.1.2", "critical"),
+    "aria-valid-attr-value": ("4.1.2", "critical"),
+    "blink": ("2.2.2", "serious"),
+    "marquee": ("2.2.2", "serious"),
+    "no-autoplay-audio": ("1.4.2", "moderate"),
+    "nested-interactive": ("4.1.2", "serious"),
+    "scrollable-region-focusable": ("2.1.1", "serious"),
+    "frame-focusable-content": ("2.1.1", "serious"),
+    "server-side-image-map": ("2.1.1", "minor"),
+    "target-size": ("2.5.8", "serious"),
+    # common best-practice rules that show up; SC marked BP
+    "region": ("BP", "moderate"),
+    "landmark-one-main": ("BP", "moderate"),
+    "landmark-unique": ("BP", "moderate"),
+    "landmark-no-duplicate-banner": ("BP", "moderate"),
+    "landmark-no-duplicate-contentinfo": ("BP", "moderate"),
+    "landmark-banner-is-top-level": ("BP", "moderate"),
+    "landmark-contentinfo-is-top-level": ("BP", "moderate"),
+    "landmark-complementary-is-top-level": ("BP", "moderate"),
+    "landmark-main-is-top-level": ("BP", "moderate"),
+    "page-has-heading-one": ("BP", "moderate"),
+    "heading-order": ("BP", "moderate"),
+    "empty-heading": ("BP", "minor"),
+    "empty-table-header": ("BP", "minor"),
+    "image-redundant-alt": ("BP", "minor"),
+    "label-title-only": ("BP", "serious"),
+    "skip-link": ("BP", "moderate"),
+    "tabindex": ("BP", "serious"),
+    "presentation-role-conflict": ("BP", "minor"),
+    "aria-allowed-role": ("BP", "minor"),
+    "aria-dialog-name": ("BP", "serious"),
+    "aria-text": ("BP", "serious"),
+    "aria-treeitem-name": ("BP", "serious"),
+    "meta-refresh": ("2.2.1", "critical"),
+    "frame-tested": ("?", "critical"),
+    "accesskeys": ("BP", "serious"),
+    "identical-links-same-purpose": ("2.4.9", "minor"),
+}
+
+HTMLCS_SC_RE = re.compile(r"WCAG2A{1,3}\.Principle\d\.Guideline\d+_\d+\.(\d+)_(\d+)_(\d+)")
+
+
+def norm_pa11y_issue(issue):
+    runner = issue.get("runner", "htmlcs")
+    code = issue.get("code", "")
+    sc, impact = "?", None
+    if runner == "axe":
+        rule = code
+        sc, impact = AXE_RULES.get(rule, ("?", None))
+    else:
+        rule = code  # full dotted technique path, keep for reference
+        m = HTMLCS_SC_RE.search(code)
+        if m:
+            sc = ".".join(m.groups())
+    return {
+        "engine": runner,
+        "rule": rule,
+        "sc": sc,
+        "impact": impact,
+        "type": issue.get("type", "error"),  # error | warning | notice
+        "message": issue.get("message", ""),
+        "selector": issue.get("selector", ""),
+        "context": (issue.get("context") or "")[:300],
+    }
+
+
+def norm_lh(data):
+    """Extract failing + manual audits from a Lighthouse a11y JSON."""
+    out = {"score": None, "failing": [], "manual": [], "findings": []}
+    cats = data.get("categories", {}).get("accessibility", {})
+    out["score"] = cats.get("score")
+    weights = {r["id"]: r.get("weight", 0) for r in cats.get("auditRefs", [])}
+    for aid, audit in data.get("audits", {}).items():
+        mode = audit.get("scoreDisplayMode")
+        if mode == "manual":
+            out["manual"].append(aid)
+            continue
+        if audit.get("score") is not None and audit["score"] < 1:
+            out["failing"].append(aid)
+            sc, impact = AXE_RULES.get(aid, ("?", None))
+            items = (audit.get("details") or {}).get("items", [])
+            for item in items[:MAX_NODES]:
+                node = item.get("node", {}) if isinstance(item, dict) else {}
+                out["findings"].append({
+                    "engine": "lighthouse",
+                    "rule": aid,
+                    "sc": sc,
+                    "impact": impact,
+                    "type": "error",
+                    "message": audit.get("title", ""),
+                    "selector": node.get("selector", ""),
+                    "context": (node.get("snippet") or "")[:300],
+                    "weight": weights.get(aid, 0),
+                })
+    return out
+
+
+def readability(path):
+    text = open(path, encoding="utf-8", errors="replace").read()
+    sentences = [s for s in re.split(r"[.!?]+[\s\"')\]]|\n{2,}", text) if s.strip()]
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", text)
+    if not words or not sentences:
+        print(json.dumps({"error": "no text"}))
+        return
+
+    def syllables(w):
+        w = w.lower()
+        groups = len(re.findall(r"[aeiouy]+", w))
+        if w.endswith("e") and groups > 1 and not w.endswith(("le", "ee", "ye")):
+            groups -= 1
+        return max(1, groups)
+
+    syl = sum(syllables(w) for w in words)
+    wps = len(words) / len(sentences)
+    spw = syl / len(words)
+    fk_grade = 0.39 * wps + 11.8 * spw - 15.59
+    fre = 206.835 - 1.015 * wps - 84.6 * spw
+    long_sentences = sum(1 for s in sentences if len(re.findall(r"\S+", s)) > 25)
+    print(json.dumps({
+        "words": len(words),
+        "sentences": len(sentences),
+        "avg_words_per_sentence": round(wps, 1),
+        "flesch_kincaid_grade": round(fk_grade, 1),
+        "flesch_reading_ease": round(fre, 1),
+        "sentences_over_25_words": long_sentences,
+        "note": "WCAG 3.1.5 (AAA): lower-secondary reading level ~ grade <= 9. Advisory, not a conformance failure at AA.",
+    }, indent=2))
+
+
+def main(outdir):
+    urls = {}
+    urls_tsv = os.path.join(outdir, "urls.tsv")
+    if os.path.exists(urls_tsv):
+        for line in open(urls_tsv):
+            n, _, u = line.rstrip("\n").partition("\t")
+            urls[n] = u
+
+    # rule -> {sc, impact, engines, messages, pages: {url: {count, nodes[]}}}
+    groups = defaultdict(lambda: {"sc": "?", "impact": None, "engines": set(),
+                                  "message": "", "type": "zzz",
+                                  "pages": defaultdict(lambda: {"count": 0, "nodes": []})})
+    seen = set()  # (sc-or-rule, url, selector) cross-engine dedup, axe wins via file order
+    lh_meta = {}
+
+    for path in sorted(glob.glob(os.path.join(outdir, "pa11y-*.json"))):
+        n = os.path.basename(path).split("-")[1]
+        url = urls.get(n, n)
+        try:
+            issues = json.load(open(path))
+        except (json.JSONDecodeError, OSError):
+            print(f"WARN: unreadable {path}", file=sys.stderr)
+            continue
+        # axe first so htmlcs duplicates dedup against it
+        issues = [norm_pa11y_issue(i) for i in issues]
+        issues.sort(key=lambda i: 0 if i["engine"] == "axe" else 1)
+        for it in issues:
+            key = (it["sc"] if it["sc"] not in ("?", "BP") else it["rule"], url, it["selector"])
+            if key in seen:
+                continue
+            seen.add(key)
+            g = groups[it["rule"]]
+            g["sc"] = it["sc"]
+            g["impact"] = g["impact"] or it["impact"]
+            g["engines"].add(it["engine"])
+            g["message"] = g["message"] or it["message"]
+            g["type"] = min(g["type"], it["type"])  # "error" sorts first, so any error marks the group a violation
+            p = g["pages"][url]
+            p["count"] += 1
+            if len(p["nodes"]) < MAX_NODES:
+                p["nodes"].append({"selector": it["selector"], "context": it["context"]})
+
+    for path in sorted(glob.glob(os.path.join(outdir, "lh-*.json"))):
+        n = os.path.basename(path).split("-")[1]
+        url = urls.get(n, n)
+        try:
+            data = json.load(open(path))
+        except (json.JSONDecodeError, OSError):
+            print(f"WARN: unreadable {path}", file=sys.stderr)
+            continue
+        lh = norm_lh(data)
+        lh_meta[url] = {"score": lh["score"], "failing": lh["failing"], "manual": lh["manual"]}
+        for it in lh["findings"]:
+            key = (it["sc"] if it["sc"] not in ("?", "BP") else it["rule"], url, it["selector"])
+            if key in seen:
+                continue
+            seen.add(key)
+            g = groups[it["rule"]]
+            g["sc"], g["impact"] = it["sc"], g["impact"] or it["impact"]
+            g["type"] = "error"  # LH failing audits are violations
+            g["engines"].add("lighthouse")
+            g["message"] = g["message"] or it["message"]
+            p = g["pages"][url]
+            p["count"] += 1
+            if len(p["nodes"]) < MAX_NODES:
+                p["nodes"].append({"selector": it["selector"], "context": it["context"]})
+
+    # split: errors (violations) vs judgment queue (warnings/notices/incomplete-ish)
+    def is_violation(g):
+        return g["type"] == "error"
+
+    impact_rank = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3, None: 4}
+    result = {"violations": [], "judgment_queue": [], "lighthouse": lh_meta}
+    for rule, g in groups.items():
+        entry = {
+            "rule": rule,
+            "sc": g["sc"],
+            "impact": g["impact"],
+            "engines": sorted(g["engines"]),
+            "message": g["message"][:200],
+            "total_instances": sum(p["count"] for p in g["pages"].values()),
+            "pages": {u: {"count": p["count"], "sample_nodes": p["nodes"]}
+                      for u, p in g["pages"].items()},
+        }
+        (result["violations"] if is_violation(g) else result["judgment_queue"]).append(entry)
+    result["violations"].sort(key=lambda e: (impact_rank.get(e["impact"], 4), -e["total_instances"]))
+    result["judgment_queue"].sort(key=lambda e: -e["total_instances"])
+
+    with open(os.path.join(outdir, "findings.json"), "w") as f:
+        json.dump(result, f, indent=1)
+
+    # summary.md
+    lines = ["# Scan summary", ""]
+    for u, m in lh_meta.items():
+        lines.append(f"- Lighthouse a11y score {m['score']}: {u}")
+    lines.append(f"- Violations (deduped rule groups): {len(result['violations'])}")
+    lines.append(f"- Judgment queue (warnings/notices, model triage needed): {len(result['judgment_queue'])}")
+    lines.append("")
+    lines.append("| Rule | SC | Impact | Engines | Instances | Pages |")
+    lines.append("|---|---|---|---|---|---|")
+    for e in result["violations"]:
+        lines.append(f"| {e['rule']} | {e['sc']} | {e['impact'] or '-'} | "
+                     f"{'+'.join(e['engines'])} | {e['total_instances']} | {len(e['pages'])} |")
+    manual = sorted({a for m in lh_meta.values() for a in m.get("manual", [])})
+    if manual:
+        lines += ["", "Lighthouse manual-check stubs (model/manual pass required): " + ", ".join(manual)]
+    with open(os.path.join(outdir, "summary.md"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"Wrote {outdir}/findings.json and {outdir}/summary.md", file=sys.stderr)
+    print("\n".join(lines))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "readability":
+        readability(sys.argv[2])
+    elif len(sys.argv) == 2:
+        main(sys.argv[1])
+    else:
+        print(__doc__)
+        sys.exit(1)

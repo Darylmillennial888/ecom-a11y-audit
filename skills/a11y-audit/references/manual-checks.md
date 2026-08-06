@@ -1,0 +1,63 @@
+# Manual / model check catalog
+
+Re-read this file at step 4 of every audit, including repeat audits in the same session, so checks don't silently drop out. Every check below ends the run in exactly one state: Verified finding, Flagged finding, Pass (only if actually exercised), or **Not exercised** (free and honest; never report as pass).
+
+## Per-check instructions
+
+### Alt text quality (SC 1.1.1): always run
+Scanners only check presence. For each sampled page, list images with their alt attributes and flag:
+- Filename alts: `alt="IMG_2041.jpg"`, `alt="hero-banner-final-v2"`
+- Filler: `alt="image"`, `alt="photo"`, `alt="logo"` (logo alt should name the company)
+- Redundant: alt duplicating the adjacent heading/caption verbatim
+- Meaningful image with `alt=""` (product photos, infographics, charts)
+- Decorative image *with* alt (dividers, spacers, ambient backgrounds)
+- Product images: alt should identify the product, ideally variant ("blue variant, side view"), not marketing copy
+Grade: Flagged (quality is a judgment call). Evidence: one selector + the current alt per pattern, then stop.
+
+### Link and button accessible names (SC 2.4.4, 4.1.2): always run
+Engines catch *empty* names. You catch *useless* ones:
+- "Click here", "Read more", "Learn more" repeated with different targets (SC 2.4.4; Lighthouse `identical-links-same-purpose` sometimes catches it)
+- Icon-only buttons whose aria-label doesn't match the action ("button" as a label)
+- Links whose accessible name differs wildly from visible text (SC 2.5.3 Label in Name)
+
+### Contrast indeterminates (SC 1.4.3, 1.4.11): when queue has them
+Text over images/gradients/CSS variables the engine punted on. With a screenshot: judge worst-case region, report Flagged with screenshot. Without: report as indeterminate with selector. Never estimate a numeric ratio you didn't compute from actual colors. Non-text contrast (1.4.11): check focus indicators, form field borders, icon buttons against 3:1.
+
+### Keyboard access (SC 2.1.1, 2.1.2, 2.4.7): when browser available
+Tab through the page top to bottom:
+- Every interactive element reachable and operable (Enter/Space)
+- Focus visible on each stop (invisible focus ring = P1)
+- No traps (can't tab out of a widget = P0)
+- Modals/drawers: focus moves in on open, returns on close, Escape closes
+- Skip link present and functional on first Tab
+Without a browser: Not exercised.
+
+### Reflow and zoom (SC 1.4.4, 1.4.10): when browser available
+Resize to 320px width: no horizontal scroll, no clipped content, no overlap. Zoom to 200%: text scales, nothing lost. Check `meta-viewport` doesn't set `user-scalable=no` or `maximum-scale=1` (scanners catch this one).
+
+### Target size (SC 2.5.8): engine-owned, verify samples
+axe/Lighthouse `target-size` covers it (24×24 CSS px minimum with spacing exceptions). If flagged, screenshot one instance to confirm it's not an inline-text exception before reporting P1.
+
+### Color-only meaning (SC 1.4.1): always run when screenshots available
+Links inside body text distinguishable only by color (Lighthouse `link-in-text-block` partial); status conveyed only by dot color; required fields marked only by red. The "no programmatic equivalent" half may be Verified from the DOM; the "color is the sole carrier" half is interpretive, so the finding is Flagged.
+
+### Reading order / visual order (SC 1.3.2): Flagged at best
+All 13 tools in the GDS accessibility-tool audit missed this. Compare DOM order (source) with visual layout on screenshot. CSS `order`/`flex-direction: row-reverse`/absolute positioning are the smells.
+
+### Forms (SC 3.3.1, 3.3.2, 1.3.5): when forms sampled
+Beyond label presence (engine-owned): error messages identify the field and say how to fix; errors announced (aria-live or focus moved); `autocomplete` attributes on identity fields (1.3.5); required indication not color-only; labels visible (placeholder-as-label = Flagged P1).
+
+### Semantic HTML (SC 1.3.1): always run, cheap
+From page source: one `<h1>`; heading levels don't skip; `<main>`/`<nav>`/`<footer>` landmarks present; lists are `<ul>/<ol>` not styled `<div>`s; data tables have `<th>`; clickable `<div>`s that should be `<button>` (also 2.1.1: they're usually not keyboard-operable).
+
+### Motion and timing (SC 2.2.1, 2.2.2, 2.3.1): always include
+Cannot be automated at all: carousels auto-advance with no pause control; session timeouts without warning; autoplaying video/animation without pause; flashing content. Check what you can from source (autoplay attributes, carousel libs), mark the rest Human-required.
+
+### Readability (SC 3.1.5, AAA: advisory only)
+`merge_findings.py readability <textfile>`. Report grade level as a recommendation. Do not count in violation totals.
+
+## High-risk patterns: name the contract, verify what you can, hand off the rest
+Custom comboboxes/autocompletes, carousels, drag-and-drop, rich text editors, data grids, tree views, live-region-heavy UI (cart drawers, toasts). For each present on a sampled page: name the APG pattern it should implement, state the keyboard/ARIA contract it owes, check the cheap DOM half (roles, aria-expanded, tabindex), and put the behavioral half on the Human-required list with the specific question a tester should answer.
+
+## Known engine blind spots (for the coverage disclosure)
+No engine checks: alt text quality, reading order, focus-indicator visibility quality, context-dependent color use, caption/transcript quality, error-message usefulness, cognitive load, motion/timing behavior. State this in every report.

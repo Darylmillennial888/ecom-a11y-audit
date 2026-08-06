@@ -1,0 +1,25 @@
+{
+  "name": "kgelster-a11y",
+  "description": "Accessibility auditing as an agent skill: automated scanners plus model judgment, honest coverage disclosure, prioritized findings.",
+  "owner": {
+    "name": "Kurt Elster"
+  },
+  "plugins": [
+    {
+      "name": "a11y-audit",
+      "source": "./",
+      "description": "WCAG 2.2 AA audit skill: pa11y (axe + HTML_CodeSniffer) + Lighthouse scanning, cross-engine dedup and compression scripts, model judgment pass, prioritized report with evidence grading.",
+      "category": "productivity",
+      "tags": [
+        "accessibility",
+        "a11y",
+        "wcag",
+        "audit",
+        "pa11y",
+        "axe-core",
+        "lighthouse",
+        "agent-skills"
+      ]
+    }
+  ]
+}
