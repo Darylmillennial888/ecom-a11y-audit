@@ -121,6 +121,54 @@ AXE_RULES = {
 
 HTMLCS_SC_RE = re.compile(r"WCAG2A{1,3}\.Principle\d\.Guideline\d+_\d+\.(\d+)_(\d+)_(\d+)")
 
+# Shopify owner attribution: app fingerprints matched (case-insensitive) against a
+# node's selector + context markup. First match wins; app markers beat the theme
+# marker because apps render inside theme sections. Selector under
+# #shopify-section-* with no app marker = theme-owned. No match = unknown
+# (model attributes it in the judge pass).
+APP_FINGERPRINTS = [
+    ("rebuy", re.compile(r"rebuy", re.I)),
+    ("okendo", re.compile(r"okendo|\boke-|\boke\b", re.I)),
+    ("klaviyo", re.compile(r"klaviyo|kl-private", re.I)),
+    ("judgeme", re.compile(r"\bjdgm", re.I)),
+    ("loox", re.compile(r"\bloox", re.I)),
+    ("yotpo", re.compile(r"yotpo", re.I)),
+    ("stamped", re.compile(r"stamped-", re.I)),
+    ("privy", re.compile(r"\bprivy", re.I)),
+    ("attentive", re.compile(r"attentive", re.I)),
+    ("postscript", re.compile(r"postscript", re.I)),
+    ("recharge", re.compile(r"recharge", re.I)),
+    ("gorgias", re.compile(r"gorgias", re.I)),
+    ("tidio", re.compile(r"tidio", re.I)),
+    ("swym-wishlist", re.compile(r"\bswym", re.I)),
+    ("nosto", re.compile(r"nosto", re.I)),
+    ("algolia", re.compile(r"algolia|\bais-", re.I)),
+    ("boost-search", re.compile(r"boost-pfs|boost-sd", re.I)),
+    ("searchanise", re.compile(r"snize", re.I)),
+    ("convermax", re.compile(r"convermax|\bcm_", re.I)),
+    ("shogun", re.compile(r"shogun", re.I)),
+    ("pagefly", re.compile(r"pagefly|\b__pf\b|\bpf-", re.I)),
+    ("gempages", re.compile(r"gempages|\bgp-", re.I)),
+    ("afterpay", re.compile(r"afterpay", re.I)),
+    ("klarna", re.compile(r"klarna", re.I)),
+    ("sezzle", re.compile(r"sezzle", re.I)),
+    ("paypal", re.compile(r"paypal|\bzoid", re.I)),
+    ("alia", re.compile(r"\balia\b", re.I)),
+    ("arttrk-pixel", re.compile(r"arttrk", re.I)),
+    ("smile-io", re.compile(r"smile-ui|\bsmile\b", re.I)),
+]
+THEME_MARKER = re.compile(r"shopify-section|\bsection-template\b", re.I)
+
+
+def owner_hint(selector, context):
+    hay = f"{selector} {context}"
+    for name, rx in APP_FINGERPRINTS:
+        if rx.search(hay):
+            return name
+    if THEME_MARKER.search(hay):
+        return "theme"
+    return None
+
 
 def norm_pa11y_issue(issue):
     runner = issue.get("runner", "htmlcs")
@@ -220,6 +268,7 @@ def main(outdir):
     # rule -> {sc, impact, engines, messages, pages: {url: {count, nodes[]}}}
     groups = defaultdict(lambda: {"sc": "?", "impact": None, "engines": set(),
                                   "message": "", "type": "zzz",
+                                  "owners": defaultdict(int),
                                   "pages": defaultdict(lambda: {"count": 0, "nodes": []})})
     # (sc-or-rule, url, selector) -> engines that recorded it. A node is skipped only
     # when ANOTHER engine already recorded the same SC on it (cross-engine dedup);
@@ -266,10 +315,16 @@ def main(outdir):
             g["engines"].add(it["engine"])
             g["message"] = g["message"] or it["message"]
             g["type"] = min(g["type"], it["type"])  # "error" sorts first, so any error marks the group a violation
+            hint = owner_hint(it["selector"], it["context"])
+            if hint:
+                g["owners"][hint] += 1
             p = g["pages"][url]
             p["count"] += 1
             if len(p["nodes"]) < MAX_NODES:
-                p["nodes"].append({"selector": it["selector"], "context": it["context"]})
+                node = {"selector": it["selector"], "context": it["context"]}
+                if hint:
+                    node["owner"] = hint
+                p["nodes"].append(node)
 
     for path in sorted(glob.glob(os.path.join(outdir, "lh-*.json"))):
         n = os.path.basename(path).split("-")[1]
@@ -289,10 +344,16 @@ def main(outdir):
             g["type"] = "error"  # LH failing audits are violations
             g["engines"].add("lighthouse")
             g["message"] = g["message"] or it["message"]
+            hint = owner_hint(it["selector"], it["context"])
+            if hint:
+                g["owners"][hint] += 1
             p = g["pages"][url]
             p["count"] += 1
             if len(p["nodes"]) < MAX_NODES:
-                p["nodes"].append({"selector": it["selector"], "context": it["context"]})
+                node = {"selector": it["selector"], "context": it["context"]}
+                if hint:
+                    node["owner"] = hint
+                p["nodes"].append(node)
 
     # split: errors (violations) vs judgment queue (warnings/notices/incomplete-ish)
     def is_violation(g):
@@ -316,6 +377,11 @@ def main(outdir):
             "pages": {u: {"count": p["count"], "sample_nodes": p["nodes"]}
                       for u, p in g["pages"].items()},
         }
+        if g["owners"]:
+            # instance counts per suspected owner (theme vs named Shopify app),
+            # from deterministic selector/markup fingerprints; unmatched
+            # instances carry no owner and need model attribution
+            entry["owner_hints"] = dict(sorted(g["owners"].items(), key=lambda kv: -kv[1]))
         (result["violations"] if is_violation(g) else result["judgment_queue"]).append(entry)
     result["violations"].sort(key=lambda e: (impact_rank.get(e["impact"], 4), -e["total_instances"]))
     result["judgment_queue"].sort(key=lambda e: -e["total_instances"])
@@ -332,11 +398,12 @@ def main(outdir):
     for u in result["unscanned_pages"]:
         lines.append(f"- **UNSCANNED** (scan failed, page is NOT clean, report as Not scanned): {u}")
     lines.append("")
-    lines.append("| Rule | SC | Impact | Engines | Instances | Pages |")
-    lines.append("|---|---|---|---|---|---|")
+    lines.append("| Rule | SC | Impact | Engines | Instances | Pages | Owner hints |")
+    lines.append("|---|---|---|---|---|---|---|")
     for e in result["violations"]:
+        owners = ", ".join(f"{k}:{v}" for k, v in e.get("owner_hints", {}).items()) or "-"
         lines.append(f"| {e['rule']} | {e['sc']} | {e['impact'] or '-'} | "
-                     f"{'+'.join(e['engines'])} | {e['total_instances']} | {len(e['pages'])} |")
+                     f"{'+'.join(e['engines'])} | {e['total_instances']} | {len(e['pages'])} | {owners} |")
     manual = sorted({a for m in lh_meta.values() for a in m.get("manual", [])})
     if manual:
         lines += ["", "Lighthouse manual-check stubs (model/manual pass required): " + ", ".join(manual)]
