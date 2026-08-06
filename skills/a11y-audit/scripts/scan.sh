@@ -13,7 +13,8 @@
 #
 # Notes:
 # - pa11y exits 2 when issues are found; that is success for our purposes.
-# - Uses npx --yes; first run downloads packages (~1 min).
+# - Uses npx --yes with pinned majors (pa11y@9, lighthouse@13) so a scanner major
+#   bump can't silently change results; first run downloads packages (~1 min).
 set -uo pipefail
 
 OUTDIR="$1"; shift
@@ -22,12 +23,18 @@ mkdir -p "$OUTDIR"
 
 i=0
 for url in "$@"; do
+  # only http(s) URLs: anything else (including dash-prefixed strings, e.g. from a
+  # hostile sitemap) would be parsed as a CLI flag by pa11y/lighthouse
+  case "$url" in
+    http://*|https://*) ;;
+    *) echo "SKIP non-http(s) argument: $url" >&2; continue ;;
+  esac
   i=$((i+1))
   slug=$(echo "$url" | sed -E 's~https?://~~; s~[^A-Za-z0-9]+~-~g; s~-+$~~' | cut -c1-60)
   printf '%s\t%s\n' "$i" "$url" >> "$OUTDIR/urls.tsv"
 
   echo "[$i] pa11y (axe+htmlcs): $url" >&2
-  npx --yes pa11y "$url" \
+  npx --yes pa11y@9 "$url" \
     --runner axe --runner htmlcs \
     --standard WCAG2AA \
     --include-warnings --include-notices \
@@ -40,7 +47,7 @@ for url in "$@"; do
 
   if [ "${LIGHTHOUSE:-0}" = "1" ]; then
     echo "[$i] lighthouse: $url" >&2
-    npx --yes lighthouse "$url" \
+    npx --yes lighthouse@13 "$url" \
       --only-categories=accessibility \
       --output=json --output-path="$OUTDIR/lh-$i-$slug.json" \
       --chrome-flags="--headless=new" --quiet 2>> "$OUTDIR/scan-errors.log" \
