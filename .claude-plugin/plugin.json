@@ -1,7 +1,7 @@
 {
   "name": "a11y-audit",
-  "version": "1.0.1",
-  "description": "Accessibility audit agent skill: scans live pages against WCAG 2.2 AA with pa11y (axe-core + HTML_CodeSniffer) and Lighthouse, adds a model judgment pass for what scanners can't decide, and produces an honest, prioritized findings report. Auditor, not fixer.",
+  "version": "1.1.0",
+  "description": "Accessibility audits for Shopify stores: scans the storefront against WCAG 2.2 AA with pa11y (axe-core + HTML_CodeSniffer) and Lighthouse, samples by theme template, attributes every finding to the theme or the injecting app (Rebuy, Okendo, Klaviyo, ...), and produces an honest, prioritized findings report with per-owner fix routes. Auditor, not fixer.",
   "author": {
     "name": "Kurt Elster"
   },
@@ -9,6 +9,7 @@
   "repository": "https://github.com/kgelster/a11y-audit-skill",
   "license": "MIT",
   "keywords": [
+    "shopify",
     "accessibility",
     "a11y",
     "wcag",

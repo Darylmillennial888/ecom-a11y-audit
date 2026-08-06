@@ -1,11 +1,11 @@
 ---
 name: a11y-audit
-description: 'Use when the user asks for an accessibility audit, a11y check, WCAG/ADA compliance review, "is this site accessible", or names a specific issue class on a live site: color contrast, alt text, link/button names, form labels, tap target size, keyboard access, semantic HTML. Audits live URLs with automated scanners plus model judgment and produces a prioritized report, optionally filing tasks in a tracker. Not for authoring accessible components (use a theme/component authoring skill for fix patterns) and not for SEO audits.'
+description: 'Use when the user asks for an accessibility audit of a Shopify store (or any live site): a11y check, WCAG/ADA compliance review, "is this store accessible", or a specific issue class: color contrast, alt text, link/button names, form labels, tap target size, keyboard access, semantic HTML. Audits the storefront with automated scanners plus model judgment, attributes every finding to the theme or the injecting app (Rebuy, Okendo, Klaviyo, etc.), and produces a prioritized report, optionally filing tasks in a tracker. Not for authoring accessible Liquid components (use a theme-authoring skill for fix patterns) and not for SEO audits.'
 ---
 
-# Accessibility Audit
+# Accessibility Audit (Shopify storefronts)
 
-You are auditing live pages against **WCAG 2.2 Level AA** using two layers: automated scanners (pa11y running the axe-core and HTML_CodeSniffer engines, optionally Lighthouse) for the deterministic checks, and your own judgment for what scanners can't decide. The deliverable is a prioritized findings report and, when requested, tasks in the user's tracker.
+You are auditing a live Shopify storefront against **WCAG 2.2 Level AA** using two layers: automated scanners (pa11y running the axe-core and HTML_CodeSniffer engines, optionally Lighthouse) for the deterministic checks, and your own judgment for what scanners can't decide. The pipeline is Shopify-shaped end to end: pages are sampled by theme template, findings are attributed to their real owner (theme code vs an injecting app), and fixes are routed accordingly. The deliverable is a prioritized findings report and, when requested, tasks in the user's tracker. The scanners work on any site; on non-Shopify targets skip the Shopify-specific steps and say so in the report.
 
 **Honesty is the product.** Automated rules cover roughly 20-40% of distinct WCAG success criteria (30-57% of issue instances, depending on how you count). Every report states this. A clean scan is never claimed as compliance. A criterion you did not check is **Undetermined**, never a pass.
 
@@ -23,12 +23,14 @@ Before scanning, confirm in one short message: target site, conformance level (d
 
 ### 2. Sample pages, don't dump them
 
-Auditing only the homepage is the most common real-world failure; the homepage is usually the *most* accessible page. Sample by template, not by URL count:
+Auditing only the homepage is the most common real-world failure; the homepage is usually the *most* accessible page. A Shopify store renders every URL through a small set of theme templates, so sample by template, not by URL count:
 
-- Fetch `sitemap.xml` first; classify URLs into template groups (home, product, collection/category, article, contact/form, cart, search, 404).
-- Pick 1 representative per template, plus any page the user named. 5-8 pages is a normal audit; 1 page is a scan, and the report must say which it was.
-- For Shopify: home + one PDP + one collection + one article + cart page minimum. Never crawl a Shopify storefront with bots beyond these fetches: automated crawls trip Cloudflare bans. Sample via sitemap fetches only.
-- Report the sampling: "audited 6 of ~140 URLs, one per template group."
+- Fetch `sitemap.xml` first (Shopify generates it; sub-sitemaps per resource type) and count URLs per template group.
+- Minimum Shopify sample: home + one PDP + one collection + one blog article + `/cart` + one content page (usually contact). Add `/search?q=` and the 404 page when the audit is thorough, plus any page the user named. Pick the PDP/collection with the most apps visible (reviews, upsells, bundles), not the sparsest one.
+- 5-8 pages covers most stores because template count, not URL count, bounds the markup variety. 1 page is a scan, not an audit, and the report must say which it was.
+- Never crawl a Shopify storefront with bots beyond these few page fetches: automated crawls trip Cloudflare bans. Sample via sitemap fetches only.
+- Checkout is Shopify-hosted and locked (non-Plus): out of scope, reported as Undetermined, never as passed.
+- Report the sampling: "audited 6 of ~1,200 URLs, one per template group."
 
 ### 3. Scan (deterministic, in scripts)
 
@@ -45,6 +47,7 @@ python3 $SKILL/scripts/merge_findings.py $OUT             # → findings.json + 
 - **Never read the raw pa11y/Lighthouse JSON into context.** Read `summary.md` and `findings.json` only; the merge script dedups cross-engine by (SC, selector), caps sample nodes at 5 per rule per page, and separates violations from the judgment queue.
 - Tripwire: if a page returns zero issues *and* zero warnings/notices, suspect the SPA rendered after the scan. Re-run with `--timeout 90000` or verify the page had content (curl the URL, check byte count).
 - For pages behind login or states behind interaction (open modal, cart drawer, form error state), use pa11y `--config` with `actions` (click/fill/wait steps), or drive a browser tool and audit the accessibility tree manually. Say in the report which states were and weren't exercised.
+- Password-protected store (dev/pre-launch): pa11y `actions` can submit the password form first (`set field #password to X`, `click element [type=submit]`, `wait for path to not be /password`). Unpublished theme: append `?preview_theme_id=<id>` to every URL; note in the report that the audit ran against a preview, and that preview sessions are cookie-sticky.
 
 ### 4. Judge (model work: this is where you beat the scanner)
 
@@ -66,7 +69,7 @@ Work through, in order:
 - Reflow at 320px width and 200% zoom: resize window, look for horizontal scroll or clipped content.
 - Color-only meaning (links distinguishable only by color, status dots).
 
-**g. Shopify attribution** (Shopify stores only). Split every finding into **theme-owned** vs **app-injected**: check whether the failing node lives in theme markup or arrives via an app script (Rebuy, Klaviyo, Okendo, review widgets: look at the selector's ancestors, class prefixes, and the script that owns the DOM subtree). App-injected failures get a separate report section: the store owner can't fix them in theme code, only via the app's settings or support. For theme-owned fixes, follow the patterns in the `liquid-theme-a11y` skill from Shopify's official AI toolkit plugin, if installed.
+**g. Owner attribution (theme vs app).** Read `references/shopify-attribution.md`. The merge script already pre-tags nodes with `owner` and rule groups with `owner_hints` from deterministic selector/markup fingerprints (Rebuy, Okendo, Klaviyo, Judge.me, chat widgets, page builders, pixels, payment iframes). Confirm the hints, attribute the untagged remainder yourself (selector ancestors, class prefixes, owning script), and split the report accordingly: the store owner can't fix app DOM in theme code, only via the app's settings or a vendor ticket. For theme-owned fixes, name the likely file (`layout/theme.liquid`, the owning section/snippet) and follow the patterns in the `liquid-theme-a11y` skill from Shopify's official AI toolkit plugin, if installed.
 
 ### 5. Report
 
@@ -98,7 +101,7 @@ Report structure (markdown):
 1. **Scope line**: pages audited / total URLs, sampling method, states exercised, date.
 2. **Coverage disclosure**: the 20-40% sentence, verbatim spirit: "Automated checks cover a minority of WCAG criteria; this audit adds manual review of X, Y, Z. Criteria not exercised are listed as Undetermined, not passed."
 3. **Findings by priority**: P0, P1, P2. Group identical issues across pages into one finding with counts; never one line per instance.
-4. **App-injected issues** (Shopify): separate section with the owning app named.
+4. **App-injected issues**: separate section grouped by app, each finding with its instance count and fix route (widget settings vs vendor ticket, per `references/shopify-attribution.md`). This is the section a merchant forwards verbatim to each vendor.
 5. **Undetermined / human-required**: grouped by shared reason, one clause per group, never a line per criterion.
 6. **Wins**: what passed, as a bare list of SC numbers with at most one sentence total.
 
@@ -126,5 +129,6 @@ Only when the user asked (or asks after seeing the report). The reference flow b
 ## References
 
 - `references/manual-checks.md`: the manual/model check catalog with per-check instructions (read at step 4).
+- `references/shopify-attribution.md`: app fingerprint table, per-app failure families, and fix routes by owner (read at step 4g).
 - Fix patterns for Shopify themes: the `liquid-theme-a11y` skill from Shopify's official AI toolkit plugin, if installed.
 - WAVE (webaim.org) is manual-only/paid API; mention as a human cross-check tool, don't automate it.
