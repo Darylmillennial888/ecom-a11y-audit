@@ -30,7 +30,7 @@ Citation: WCAG 2.2 SC 1.4.3 (Contrast Minimum, Level AA). Engines: axe+lighthous
 As a Claude Code plugin:
 
 ```
-/plugin marketplace add kgelster/a11y-audit-skill
+/plugin marketplace add kgelster/ecom-a11y-audit
 /plugin install a11y-audit@kgelster-a11y
 ```
 
