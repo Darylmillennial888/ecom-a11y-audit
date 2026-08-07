@@ -69,6 +69,13 @@ Design notes, for the curious:
 - Storefront sampling stays within a handful of page fetches: bot crawls of Shopify storefronts trip Cloudflare bans.
 - The skill is an auditor, not a fixer. It recommends fixes with concrete replacement values (computed hex colors, aria-label patterns, the owning Liquid file) but does not edit code or write content without a separate ask.
 
+## Contributing
+
+PRs welcome. Every PR validates the skill's `SKILL.md` against the
+[Agent Skills spec](https://agentskills.io/specification) via
+`.github/scripts/validate_skills.py`. Run the same check before you commit with
+`git config core.hooksPath .githooks`.
+
 ## License
 
 MIT © Kurt Elster
